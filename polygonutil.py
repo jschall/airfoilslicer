@@ -41,12 +41,6 @@ def getLineSegments(points):
         lineSegments.append((points[i],points[i+1]))
     return lineSegments
 
-def segmentIntersection(segment1, segment2):
-    x1 = segment1[0]
-    y1 = segment1[1]
-    x2 = segment2[0]
-    y2 = segment2[1]
-
 def getPolyLineIntersections(polyline1, polyline2):
     polyline1 = LineString(polyline1)
     polyline2 = LineString(polyline2)

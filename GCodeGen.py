@@ -17,7 +17,7 @@ class GCodeGen:
         self.liftSpeed=130.
         self.retractSpeed=40.
         self.printSpeed=90.
-        self.bridgeSpeed=30.
+        self.bridgeSpeed=45.
 
         self.X = 0.
         self.Y = 0.
@@ -76,7 +76,7 @@ class GCodeGen:
         h = self.layerHeight*0.5
         r = layerWidth*0.5
         if bridge:
-            trackArea = pi*(self.extruderDiameter*0.5)**2
+            trackArea = pi*(self.extruderDiameter*0.5)**2 * .95 # 5% stretch
         else:
             trackArea = pi*r**2 - 2.*(0.5 * r**2 * 2.*acos(h/r) - 0.5 * h * sqrt(r**2-h**2))
         filamentArea = pi*(self.filamentDiameter*0.5)**2

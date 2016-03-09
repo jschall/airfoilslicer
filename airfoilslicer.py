@@ -7,25 +7,6 @@ import re
 import numpy as np
 from scipy.optimize import minimize
 
-def getSurfaceCoords(fname):
-    surfaceSectionRegex = r'Airfoil surface,\nX\(mm\),Y\(mm\)\n(([-+]?[0-9]*\.?[0-9]+),([-+]?[0-9]*\.?[0-9]+)\n)+'
-    camberSectionRegex = r'Camber line,\nX\(mm\),Y\(mm\)\n(([-+]?[0-9]*\.?[0-9]+),([-+]?[0-9]*\.?[0-9]+)\n)+'
-    floatRegex = r'([-+]?[0-9]*\.?[0-9]+)'
-
-    with open(fname) as csvfile:
-        csvstring = csvfile.read()
-
-    # find the surface section
-    surfacesection = re.search(surfaceSectionRegex, csvstring).group(0)
-
-    # find all the floats in the surface section
-    floatlist = re.findall(floatRegex, surfacesection)
-
-    ret = []
-    for i in range(0, len(floatlist), 2):
-        ret.append((float(floatlist[i]), float(floatlist[i+1])))
-    return ret
-
 class AirfoilSlicer:
     def __init__(self, fname, wing_length=200., root_chord=100., washout=radians(1.0), dihedral=radians(1.0), sweep=radians(0.0), taper_ratio=0.75, print_center=(100.,100.)):
         self.print_center=np.asarray(print_center)
@@ -90,10 +71,13 @@ class AirfoilSlicer:
 
         self.thickestCamberDist = minimize(lambda d: -self.getNormThicknessAtCamberPoint(d), self.normCamberLineLength/2.).x[0]
 
+    def getChordLength(self,Z):
+        return self.root_chord * (1. - (1.-self.taper_ratio)*Z/self.wing_length)
+
     def applyTransformations(self,Z,points):
         offset = np.array([tan(self.sweep)*Z,tan(self.dihedral)*Z])
         twist = self.washout * Z/self.wing_length
-        chord = self.root_chord * (1. - (1.-self.taper_ratio)*Z/self.wing_length)
+        chord = self.getChordLength(Z)
 
         return map(lambda x: np.append(x*chord+offset,[Z]), polygonutil.rotatePoints(points,twist))
 
@@ -124,57 +108,40 @@ class AirfoilSlicer:
 
         return np.linalg.norm(pt2-pt1)
 
-
-    def getSupports2(self,Z):
-        spar = self.getSupportLine(Z,self.thickestCamberDist,pi/2)
-        supports = [spar]
+    def printTruss(self,Z):
         printTruss = False
-        for trussLoc in np.linspace(.5,self.wing_length-.5, self.wing_length/20.):
-            if abs(trussLoc-Z) < 0.5:
+        for trussLoc in np.linspace(.3,self.wing_length-.3, self.wing_length/20.):
+            if abs(trussLoc-Z) < 0.3:
                 printTruss = True
+        return printTruss
 
-        if printTruss:
-            # find truss locations for this layer
-            pass
+    def getTrussVerticals(self,Z):
+        numTrussVerticals = 8
+        return map(lambda x: self.getSupportLine(Z,x,pi/2),np.linspace(0.+1.*self.normCamberLineLength/16.,self.normCamberLineLength*(1.-1./8.),numTrussVerticals))
 
-        return supports
+    def getSpar(self,Z):
+        verticals = self.getTrussVerticals(Z)
+        verticalLengths = map(lambda x: np.linalg.norm(x[0]-x[1]), verticals)
+        maxLength = max(verticalLengths)
+        return verticals[verticalLengths.index(maxLength)]
 
+    def getTrussCrosses(self,Z):
+        verticals = self.getTrussVerticals(Z)
+        ret = []
 
-    def getSupports(self,Z):
-        supportLocations = np.linspace(.6,self.wing_length-.6, self.wing_length/20.)
+        for i in range(len(verticals)-1):
+            if i%2 == 0:
+                ret.append([verticals[i][0], verticals[i+1][1]])
+            else:
+                ret.append([verticals[i][1], verticals[i+1][0]])
 
-        verticalSupport = False
-        crossSupport = False
+        for i in reversed(range(len(verticals)-1)):
+            if i%2 == 0:
+                ret.append([verticals[i+1][0], verticals[i][1]])
+            else:
+                ret.append([verticals[i+1][1], verticals[i][0]])
 
-        for loc in supportLocations:
-            if abs(loc-Z) < 0.6:
-                verticalSupport = True
-            if Z-loc > -0.3 and Z-loc<0.6:
-                crossSupport = True
-
-        supportCenters = [ 0.10044348,  0.22599783,  0.35155218,  0.47710653,  0.60266088,  0.7021523, (0.72821523+0.85376958)/2, 0.86376958, .92]
-        supportDirections = []
-        if verticalSupport:
-            supportDirections.append(pi/2.)
-        if crossSupport:
-            supportDirections.append(pi/4.)
-            supportDirections.append(3.*pi/4.)
-
-        intersectShape = polygonutil.shrinkPolygon(self.applyTransformations(Z,self.normSurface),0.4)
-
-        supports = []
-
-        for centerDist in supportCenters:
-            centerPoint = self.applyTransformations(Z,[polygonutil.traversePolyLine(self.normCamberLine,centerDist)])[0][0:2]
-            camberAngle = polygonutil.getPolyLineDirection(self.normCamberLine,centerDist)
-            for direction in supportDirections:
-                supportUnitVec = np.array([cos(direction+camberAngle), sin(direction+camberAngle)])
-                point1 = polygonutil.getClosestIntersection(centerPoint, [centerPoint, centerPoint+supportUnitVec*1000.], intersectShape)
-                point2 = polygonutil.getClosestIntersection(centerPoint, [centerPoint, centerPoint-supportUnitVec*1000.], intersectShape)
-                if point1 is not None and point2 is not None:
-                    supports.append([np.append(point1,[Z]), np.append(point2,[Z])])
-
-        return supports
+        return ret
 
     def getSurface(self, Z):
         return self.applyTransformations(Z,self.normSurface)
@@ -196,21 +163,32 @@ class AirfoilSlicer:
             gcg.beginLayer(0.3 if firstLayer else 0.1)
             if firstLayer:
                 gcg.drawLine((10,10),(10,190))
+                gcg.drawLine((10,190),(12,190))
+                gcg.drawLine((12,190),(12,10))
             firstLayer = False
             print "%f/%f" % (gcg.Z, self.wing_length)
             lines = polygonutil.getLineSegments(self.getSurface(gcg.Z))
             for seg in lines:
                 gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]))
 
-            supports = self.getSupports(gcg.Z)
+            if self.printTruss(gcg.Z):
+                verticals = self.getTrussVerticals(gcg.Z)
+                if not reverse:
+                    verticals = map(lambda x: list(reversed(x)),reversed(verticals))
 
-            for support in supports:
-                lines = polygonutil.getLineSegments(support)
-                for seg in lines:
-                    if reverse:
-                        gcg.drawLine(self.translatePointToPrintCenter(seg[1][0:2]), self.translatePointToPrintCenter(seg[0][0:2]), bridge=True)
-                    else:
-                        gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]), bridge=True)
+                for seg in verticals:
+                    gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]), bridge=True)
+
+                crosses = self.getTrussCrosses(gcg.Z)
+                if reverse:
+                    crosses = map(lambda x: list(reversed(x)),reversed(crosses))
+
+                for seg in crosses:
+                    gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]), bridge=True)
+            else:
+                seg = self.getSpar(gcg.Z)
+                gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]))
+
             reverse = not reverse
 
         gcg.output(fname)
@@ -237,6 +215,10 @@ if args.visualize:
         #curve(pos=slicer.getSpar(Z), color=color.yellow)
         #curve(pos=slicer.getCamber(Z), color=color.yellow)
         #curve(pos=slicer.getChord(Z), color=color.green)
-        for supports in slicer.getSupports(Z):
-            #print supports
-            curve(pos=supports, color=color.red)
+        if slicer.printTruss(Z):
+            for p in slicer.getTrussVerticals(Z):
+                curve(pos=p, color=color.red)
+            for p in slicer.getTrussCrosses(Z):
+                curve(pos=p, color=color.yellow)
+        else:
+            curve(pos=slicer.getSpar(Z), color=color.green)
