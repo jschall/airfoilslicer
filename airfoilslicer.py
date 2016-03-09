@@ -8,7 +8,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 class AirfoilSlicer:
-    def __init__(self, fname, wing_length=200., root_chord=100., washout=radians(1.0), dihedral=radians(1.0), sweep=radians(0.0), taper_ratio=0.75, print_center=(100.,100.)):
+    def __init__(self, fname, wing_length=200., root_chord=120., washout=radians(1.0), dihedral=radians(1.0), sweep=radians(0.0), taper_ratio=0.75, print_center=(100.,100.)):
         self.print_center=np.asarray(print_center)
         self.wing_length=wing_length
         self.root_chord=root_chord
@@ -110,13 +110,13 @@ class AirfoilSlicer:
 
     def printTruss(self,Z):
         printTruss = False
-        for trussLoc in np.linspace(.3,self.wing_length-.3, self.wing_length/20.):
-            if abs(trussLoc-Z) < 0.3:
+        for trussLoc in np.linspace(.25,self.wing_length-.25, self.wing_length/12.5):
+            if abs(trussLoc-Z) <= 0.25:
                 printTruss = True
         return printTruss
 
     def getTrussVerticals(self,Z):
-        numTrussVerticals = 8
+        numTrussVerticals = 10
         return map(lambda x: self.getSupportLine(Z,x,pi/2),np.linspace(0.+1.*self.normCamberLineLength/16.,self.normCamberLineLength*(1.-1./8.),numTrussVerticals))
 
     def getSpar(self,Z):
@@ -168,6 +168,8 @@ class AirfoilSlicer:
             firstLayer = False
             print "%f/%f" % (gcg.Z, self.wing_length)
             lines = polygonutil.getLineSegments(self.getSurface(gcg.Z))
+            if reverse:
+                lines = map(lambda x: list(reversed(x)),reversed(lines))
             for seg in lines:
                 gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]))
 
@@ -187,6 +189,8 @@ class AirfoilSlicer:
                     gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]), bridge=True)
             else:
                 seg = self.getSpar(gcg.Z)
+                if reverse:
+                    seg = list(reversed(seg))
                 gcg.drawLine(self.translatePointToPrintCenter(seg[0][0:2]), self.translatePointToPrintCenter(seg[1][0:2]))
 
             reverse = not reverse
